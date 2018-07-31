@@ -10,6 +10,8 @@ import (
 	"fmt"
 	"strconv"
 	"time"
+	"io/ioutil"
+	"encoding/json"
 
 	"github.com/EMSL-MSC/ovirtapi"
 	"github.com/hashicorp/terraform/helper/schema"
@@ -39,6 +41,7 @@ func resourceVM() *schema.Resource {
 			"memory": {
 				Type:     schema.TypeInt,
 				Optional: true,
+				ForceNew: true,
 			},
 			"cores": {
 				Type:     schema.TypeInt,
@@ -56,6 +59,19 @@ func resourceVM() *schema.Resource {
 				Type:     schema.TypeString,
 				Optional: true,
 				Default:  "",
+			},
+			"cloud_init": {
+				Type:     schema.TypeString,
+				Optional: true,
+				Default:  "",
+				ForceNew: true,
+			},
+			"metadata": {
+				Type:     schema.TypeList,
+				Optional: true,
+				Elem: &schema.Schema{
+					Type:     schema.TypeMap,
+				},
 			},
 			"network_interface": {
 				Type:     schema.TypeList,
@@ -162,9 +178,14 @@ func resourceVMCreate(d *schema.ResourceData, meta interface{}) error {
 			Threads: d.Get("threads").(int),
 		},
 	}
+	newVM.Memory = d.Get("memory").(int)
+//        newVM.MemoryPolicy = &ovirtapi.MemoryPolicy{
+//		Guaranteed: d.Get("memory").(int)
+//	}
 	newVM.Initialization = &ovirtapi.Initialization{}
 
 	newVM.Initialization.AuthorizedSSHKeys = d.Get("authorized_ssh_key").(string)
+        newVM.Initialization.CustomScript = d.Get("cloud_init").(string)
 
 	numNetworks := d.Get("network_interface.#").(int)
 	NICConfigurations := make([]ovirtapi.NICConfiguration, numNetworks)
@@ -188,10 +209,14 @@ func resourceVMCreate(d *schema.ResourceData, meta interface{}) error {
 		}
 	}
 	newVM.Initialization.NICConfigurations = &ovirtapi.NICConfigurations{NICConfiguration: NICConfigurations}
-
+	json, _ := json.Marshal(newVM)
+	ioutil.WriteFile("/tmp/debug", json, 0644)
 	err := newVM.Save()
 	if err != nil {
 		return err
+	}
+	if len(newVM.ID) == 0 {
+	  return fmt.Errorf("ID is empty")
 	}
 	d.SetId(newVM.ID)
 
@@ -239,22 +264,22 @@ func resourceVMRead(d *schema.ResourceData, meta interface{}) error {
 	vm, err := con.GetVM(d.Id())
 
 	if err != nil {
-		d.SetId("")
-		return nil
+		// d.SetId("")
+		return err
 	}
 	d.Set("name", vm.Name)
 
 	cluster, err := con.GetCluster(vm.Cluster.ID)
 	if err != nil {
-		d.SetId("")
-		return nil
+		// d.SetId("")
+		return err
 	}
 	d.Set("cluster", cluster.Name)
 
 	template, err := con.GetTemplate(vm.Template.ID)
 	if err != nil {
-		d.SetId("")
-		return nil
+		// d.SetId("")
+		return err
 	}
 	d.Set("template", template.Name)
 	d.Set("cores", vm.CPU.Topology.Cores)
